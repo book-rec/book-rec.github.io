@@ -1,0 +1,93 @@
+import praw
+import re
+import time
+from uuid import uuid4
+from formatter_factory import FormatterFactory
+
+
+class Bot:
+    def __init__(self):
+        self.reddit = praw.Reddit(client_id='SJRwHAqifgsyG-KqbsL03g',
+                     client_secret='CVeOZIdtI7lSwdw622-yi-WYfTMIwg', password='Saida1964.',
+                     user_agent='PrawTut', username='book-rec-bot')
+
+    
+    def listen_to_subreddit(self, name):
+        for comment in self.reddit.subreddit(name).stream.comments():
+            print("comment: ", comment.body)
+            submission = comment.submission
+            formatted_reddit_comment = ""
+            for m in re.finditer('\{\{([^}]+)\}\}|\{([^}]+)\}', comment.body):
+                # Clean the Input
+                group = m.group()
+                cleaned = self.__clean_group(group)
+
+                print("group: ", group)
+                print("cleaned: ", cleaned)
+
+                # Extract the book and author, then retrieve the data from GoodReads
+                book, author = self.__extract_book_and_author(cleaned)
+                book_id = "self.goodreads.get_book_id(book, author)"
+                book_info = "self.goodreads.get_book_info(book_id)"
+
+                print("book_info", book_info)
+                if book_info is None:
+                    continue
+
+                # Save the book and summons for our stats
+                book = (book_id, book_info["title"], book_info["url"],
+                        int(time.time()))
+                invocation = (str(uuid4()), book_id, comment.id, submission.id,
+                              "", comment.permalink, int(time.time()))
+                #self.db.save_book(book)
+                #self.db.save_invocation(invocation)
+
+                #book_suggestions = self.db.count_book_requests(book_id)
+
+                formatter = FormatterFactory.for_subreddit(
+                    subreddit_name=comment.subreddit.display_name,
+                    book_info=book_info,
+                    cleaned=cleaned)
+
+                # Build the formatted Reddit comment
+                formatted_reddit_comment += formatter.format_link() + formatter.get_section_separator()
+                formatted_reddit_comment += formatter.format_header() + formatter.get_section_separator()
+                if self.__is_long_version(group) and formatter.supports_long_version():
+                    formatted_reddit_comment += formatter.format_description() + formatter.get_section_separator()
+
+                formatted_reddit_comment += formatter.format_book_footer() + formatter.get_section_separator()
+
+            if len(formatted_reddit_comment) > 0:
+                # We are responding to a comment, so let's save the post
+                post = (submission.id, submission.title, submission.url)
+                # self.db.save_post(post)
+
+                formatted_reddit_comment += "***" + formatter.get_section_separator()
+
+                # invocations = self.db.count_invocations()
+        
+                #comment.reply(formatted_reddit_comment)
+                print('going to reply with', formatted_reddit_comment)
+
+    def __extract_book_and_author(self, match):
+        book, *author = match.lower().rsplit("by", 1)
+        book = book.strip()
+        author = author[0].strip() if author else None
+
+        return (book, author)
+
+    def __is_long_version(self, group):
+        return (group.count("{") + group.count("}")) == 4
+
+    def __is_short_version(self, group):
+        return (group.count("{") + group.count("}")) == 2
+
+    def __clean_group(self, group):
+        return group.replace("{", "").replace("}", "").replace("*", "")
+
+    def __make_footer(self, suggestions):
+            s = "s" if suggestions > 1 else ""
+            return "^(%s book%s suggested | )[^(I don't feel so good.. )](https://debugger.medium.com/goodreads-is-retiring-its-current-api-and-book-loving-developers-arent-happy-11ed764dd95)^(| )[^(Source)](https://github.com/rodohanna/reddit-goodreads-bot)" % (
+                suggestions, s)
+
+            
